@@ -5,4 +5,4 @@ bcrypt
 opencv-python
 pyzbar
 openpyxl
-
+pyOpenSSL
