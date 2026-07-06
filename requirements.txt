@@ -1,0 +1,8 @@
+flask
+werkzeug==3.0.0
+numpy
+bcrypt
+opencv-python
+pyzbar
+openpyxl
+pyOpenSSL
