@@ -1,0 +1,15 @@
+.idea/
+.venv/
+__pycache__/
+*.pyc
+
+attendance.db
+
+unrecognized_faces/
+*.mp3
+
+students.xlsx
+teachers.xlsx
+
+*.log
+.env

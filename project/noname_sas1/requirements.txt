@@ -1,0 +1,10 @@
+flask
+werkzeug==3.0.0
+numpy
+bcrypt
+opencv-python
+insightface
+pyzbar
+openpyxl
+gunicorn
+onnxruntime
