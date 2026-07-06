@@ -591,3 +591,7 @@ def export_attendance():
 
 if __name__ == "__main__":
     app.run(debug=True)
+    
+    #for runninf in mobile phone change the above code to:
+#if __name__ == "__main__":
+    #app.run(host="0.0.0.0", port=5000, debug=True, ssl_context="adhoc")
