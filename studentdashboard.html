@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard — Smart Attendance</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='attendance.css') }}">
+    <style>
+        .subject-filter-row { display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap; }
+        .subject-filter-row select { padding:8px 14px; border-radius:8px; border:1px solid rgba(120,130,120,0.2); font-family:'Poppins',sans-serif; font-size:13px; color:#46524a; background:rgba(255,255,255,0.6); outline:none; cursor:pointer; }
+        .sub-stat-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(195px,1fr)); gap:12px; margin-top:4px; }
+        .sub-stat-card { background:rgba(255,255,255,0.5); border:1px solid rgba(120,130,120,0.14); border-radius:12px; padding:14px; }
+        .sub-stat-card .sub-code { font-size:13px; font-weight:700; color:#46524a; }
+        .sub-stat-card .sub-name { font-size:10px; color:rgba(70,80,70,0.55); margin-bottom:8px; line-height:1.4; }
+        .sub-stat-mini { display:flex; justify-content:space-between; font-size:11px; color:rgba(70,80,70,0.6); }
+        .mini-bar { height:5px; background:rgba(120,130,120,0.12); border-radius:3px; margin:6px 0; }
+        .mini-fill { height:100%; border-radius:3px; background:linear-gradient(135deg,#a8c3b0,#8faa94); }
+        .mini-fill.low { background:linear-gradient(135deg,#c9a0a0,#b08080); }
+
+        /* Routine table */
+        .routine-wrap { overflow-x:auto; }
+        .routine-table { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; }
+        .routine-table th { background:rgba(142,168,145,0.12); padding:8px 10px; text-align:center; font-size:10px; font-weight:600; color:rgba(70,80,70,0.6); text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid rgba(120,130,120,0.12); }
+        .routine-table th.day-col { text-align:left; width:70px; }
+        .routine-table td { padding:6px 8px; border-bottom:1px solid rgba(120,130,120,0.07); vertical-align:top; }
+        .routine-table td.day-name { font-size:11px; font-weight:600; color:rgba(70,80,70,0.55); text-transform:uppercase; letter-spacing:0.5px; padding-top:10px; }
+        .rt-cell { background:rgba(142,168,145,0.1); border:1px solid rgba(142,168,145,0.22); border-radius:8px; padding:7px 8px; text-align:center; }
+        .rt-cell .rt-code { font-weight:700; font-size:12px; color:#46524a; }
+        .rt-cell .rt-name { font-size:9px; color:rgba(70,80,70,0.55); line-height:1.3; margin-top:2px; }
+        .rt-cell .rt-room { font-size:9px; color:rgba(70,80,70,0.4); margin-top:2px; }
+        .rt-empty { color:rgba(70,80,70,0.2); text-align:center; font-size:13px; }
+        .ku-credit { font-size:11px; color:rgba(70,80,70,0.4); margin-top:12px; }
+        .ku-credit a { color:rgba(70,80,70,0.55); }
+    </style>
+</head>
+<body class="dashboard">
+
+<nav class="navbar">
+    <div class="nav-brand">
+        <div class="nav-logo">📋</div>
+        <div class="nav-title">Smart Attendance<span>Kathmandu University</span></div>
+    </div>
+    <div class="nav-right">
+        <span class="student-badge">🎓 Student</span>
+        <a href="/student-logout" class="logout-btn">← Logout</a>
+    </div>
+</nav>
+
+<div class="main">
+    <div class="page-header">
+        <h1>Hello, {{ student.name }} 👋</h1>
+        <p>{{ student.course }} · Year {{ student.year }} · {{ student.email }}</p>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">Total Classes</div>
+            <div class="stat-value">{{ total_classes }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Present</div>
+            <div class="stat-value">{{ total_present }}</div>
+        </div>
+        <div class="stat-card red">
+            <div class="stat-label">Absent</div>
+            <div class="stat-value">{{ absent_total }}</div>
+        </div>
+        <div class="stat-card blue">
+            <div class="stat-label">Subjects</div>
+            <div class="stat-value">{{ subjects|length }}</div>
+        </div>
+    </div>
+
+    <!-- Overall % + Subject Summary -->
+    <div class="two-col">
+        <div class="dash-card">
+            <h2>Overall Attendance</h2>
+            <div class="percent-wrap">
+                <div class="ring" id="overallRing">
+                    <div class="ring-inner">
+                        <div class="ring-value">{{ overall_pct }}%</div>
+                        <div class="ring-label">Attended</div>
+                    </div>
+                </div>
+                {% if overall_pct >= 75 %}
+                <p class="percent-status" style="color:#5c7560">✓ Above 75% requirement</p>
+                {% else %}
+                <p class="percent-status" style="color:#9b5c5c">⚠️ Below 75% minimum</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="dash-card">
+            <h2>Subject-wise Summary</h2>
+            <div class="sub-stat-grid">
+                {% for s in subject_stats %}
+                <div class="sub-stat-card">
+                    <div class="sub-code">{{ s.subject_id }}</div>
+                    <div class="sub-name">{{ s.subject_name }}</div>
+                    <div class="mini-bar">
+                        <div
+                            class="{{ 'mini-fill low' if s.percent < 75 else 'mini-fill' }}"
+                            style="--pct: {{ s.percent }}%;">
+                        </div>
+                    </div>
+                    <div class="sub-stat-mini"><span>{{ s.present }}/{{ s.total }} days</span><span {% if s.percent < 75 %}style="color:#9b5c5c"{% endif %}>{{ s.percent }}%</span></div>
+                </div>
+                {% endfor %}
+                {% if not subject_stats %}
+                <p style="color:rgba(70,80,70,0.4);font-size:13px;">No subject data yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Attendance Records with Subject Dropdown -->
+    <div class="dash-card">
+        <h2>Attendance Records</h2>
+        <div class="subject-filter-row">
+            <select id="subjectDropdown" onchange="filterAttendance()">
+                <option value="">All Subjects</option>
+                {% for s in subjects %}
+                <option value="{{ s.subject_id }}">{{ s.subject_id }} — {{ s.subject_name }}</option>
+                {% endfor %}
+            </select>
+            <input type="date" id="dateFilter" onchange="filterAttendance()">
+            <button class="filter-btn" onclick="filterAttendance()">Filter</button>
+            <button class="filter-btn" onclick="clearFilters()" style="background:rgba(255,255,255,0.6);color:#46524a;border:1px solid rgba(120,130,120,0.2);">Clear</button>
+        </div>
+        <div class="tabs">
+            <button class="tab active" onclick="showStatusTab('all',event)">All</button>
+            <button class="tab" onclick="showStatusTab('present',event)">Present</button>
+        </div>
+        <div id="attendanceTable">
+            <table>
+                <thead><tr><th>Date</th><th>Subject</th><th>Subject Name</th><th>Time</th><th>Status</th></tr></thead>
+                <tbody id="attendanceBody">
+                    <tr><td colspan="5" style="text-align:center;color:rgba(70,80,70,0.4);padding:20px;">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="noRecords" style="display:none;text-align:center;padding:24px;color:rgba(70,80,70,0.4);font-size:13px;">No attendance records found.</div>
+    </div>
+
+    <!-- Class Routine — CE-II/II timetable (from database) -->
+    <div class="dash-card">
+        <h2>📅 Class Routine — KU DoCSE CE Year II (Semester II)</h2>
+        <p style="font-size:12px;color:rgba(70,80,70,0.5);margin-bottom:14px;">Effective May 14, 2026 · Group: CE-II/II</p>
+
+        {% set days_order = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] %}
+        {% set time_slots = routine | map(attribute='start_time') | unique | list | sort %}
+
+        <div class="routine-wrap">
+        <table class="routine-table">
+            <thead>
+                <tr>
+                    <th class="day-col">Day</th>
+                    {% for t in time_slots %}
+                    <th>{{ t }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in days_order %}
+                {% set day_rows = routine | selectattr('day', 'equalto', day) | list %}
+                {% if day_rows %}
+                <tr>
+                    <td class="day-name">{{ day[:3] }}</td>
+                    {% for t in time_slots %}
+                        {% set cell = day_rows | selectattr('start_time', 'equalto', t) | first %}
+                        {% if cell %}
+                        <td><div class="rt-cell"><div class="rt-code">{{ cell.subject_id }}</div><div class="rt-name">{{ cell.subject_name }}</div><div class="rt-room">{{ cell.room }} · {{ cell.teacher_name }}</div></div></td>
+                        {% else %}
+                        <td class="rt-empty">—</td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endif %}
+                {% endfor %}
+                {% if not routine %}
+                <tr><td colspan="{{ (time_slots|length) + 1 }}" style="text-align:center;color:rgba(70,80,70,0.4);">No routine entries found.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+        </div>
+
+        <p class="ku-credit">
+            Source: <a href="https://docse.netlify.app/docse_routine_may_14_2026_master_groups_days_vertical#table_21" target="_blank">KU DoCSE Official Routine (May 14, 2026)</a>
+        </p>
+    </div>
+
+</div>
+
+<script>
+let allRecords = [];
+let currentStatusFilter = 'all';
+
+async function loadAttendance() {
+    const subjectId = document.getElementById('subjectDropdown').value;
+    const dateVal   = document.getElementById('dateFilter').value;
+    let url = '/api/student/attendance?';
+    if (subjectId) url += `subject=${encodeURIComponent(subjectId)}&`;
+    if (dateVal)   url += `date=${dateVal}&`;
+    try {
+        const res  = await fetch(url);
+        allRecords = await res.json();
+    } catch(e) { allRecords = []; }
+    renderTable();
+}
+
+function renderTable() {
+    const tbody = document.getElementById('attendanceBody');
+    const noRec = document.getElementById('noRecords');
+    const tbl   = document.getElementById('attendanceTable');
+    let filtered = currentStatusFilter === 'present'
+        ? allRecords.filter(r => r.status === 'present')
+        : allRecords;
+    if (filtered.length === 0) {
+        tbl.style.display = 'none';
+        noRec.style.display = 'block';
+        return;
+    }
+    tbl.style.display = 'block';
+    noRec.style.display = 'none';
+    tbody.innerHTML = filtered.map(r => `
+        <tr style="${r.status === 'absent' ? 'opacity:0.75;' : ''}">
+            <td>${r.date}</td>
+            <td>${r.subject_id}</td>
+            <td>${r.subject_name}</td>
+            <td>${r.time || '—'}</td>
+            <td>${r.status === 'present'
+                ? '<span class="badge badge-present">✓ Present</span>'
+                : '<span class="badge" style="background:rgba(180,80,80,0.12);color:#9b5c5c;border:1px solid rgba(180,80,80,0.2);padding:3px 10px;border-radius:20px;font-size:11px;">✗ Absent</span>'
+            }</td>
+        </tr>
+    `).join('');
+}
+
+function filterAttendance() { loadAttendance(); }
+function clearFilters() {
+    document.getElementById('subjectDropdown').value = '';
+    document.getElementById('dateFilter').value = '';
+    loadAttendance();
+}
+function showStatusTab(name, event) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    currentStatusFilter = name;
+    renderTable();
+}
+
+// Dynamic ring
+const pct = Number('{{ overall_pct }}');
+document.getElementById('overallRing').style.background =
+    `conic-gradient(#8faa94 0% ${pct}%, rgba(120,130,120,0.15) ${pct}% 100%)`;
+
+loadAttendance();
+</script>
+</body>
+</html>
