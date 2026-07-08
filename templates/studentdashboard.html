@@ -201,8 +201,8 @@ async function loadAttendance() {
     const subjectId = document.getElementById('subjectDropdown').value;
     const dateVal   = document.getElementById('dateFilter').value;
     let url = '/api/student/attendance?';
-    if (subjectId) url += subject=${encodeURIComponent(subjectId)}&;
-    if (dateVal)   url += date=${dateVal}&;
+    if (subjectId) url += `subject=${encodeURIComponent(subjectId)}&`;
+    if (dateVal)   url += `date=${dateVal}&`;
     try {
         const res  = await fetch(url);
         allRecords = await res.json();
@@ -225,13 +225,15 @@ function renderTable() {
     tbl.style.display = 'block';
     noRec.style.display = 'none';
     tbody.innerHTML = filtered.map(r => `
-        <tr>
-            <td>${r.date}</td>
-            <td>${r.subject_id}</td>
-            <td>${r.subject_name}</td>
-            <td>${r.time || '—'}</td>
-            <td><span class="badge badge-present">✓ Present</span></td>
-        </tr>
+    <tr>
+        <td>${r.date}</td>
+        <td>${r.subject_id}</td>
+        <td>${r.subject_name}</td>
+        <td>${r.time || '—'}</td>
+        <td>${r.status === 'present'
+            ? '<span class="badge badge-present">✓ Present</span>'
+            : '<span class="badge badge-absent">✗ Absent</span>'}</td>
+    </tr>
     `).join('');
 }
 
@@ -251,7 +253,7 @@ function showStatusTab(name, event) {
 // Dynamic ring
 const pct = Number('{{ overall_pct }}');
 document.getElementById('overallRing').style.background =
-    conic-gradient(#8faa94 0% ${pct}%, rgba(120,130,120,0.15) ${pct}% 100%);
+    `conic-gradient(#8faa94 0% ${pct}%, rgba(120,130,120,0.15) ${pct}% 100%)`;
 
 loadAttendance();
 </script>

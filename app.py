@@ -604,37 +604,96 @@ def api_live_attendance():
 
 @app.route("/export/attendance")
 def export_attendance():
+    """
+    Export attendance as a CSV register, like a manual attendance sheet:
+
+        Student Name, 2026-06-01, 2026-06-02, 2026-06-03, ...
+        Aashish Rai,  Present,    Absent,     Present,    ...
+        Bina Shah,    Absent,     Present,    Present,    ...
+
+    Column 1 is the student's name, every column after that is one class
+    date (every session actually opened for this subject, from the
+    `sessions` table), and each cell says Present or Absent for that
+    student on that date.
+
+    Query params:
+      subject    — subject_id (required)
+      start_date — e.g. 2026-06-01 (optional)
+      end_date   — e.g. 2026-06-30 (optional)
+    """
     if "teacher_id" not in session:
         return redirect(url_for("teacher_login"))
     subject_id = request.args.get("subject", "")
-    from_date = request.args.get("from", "")
-    to_date = request.args.get("to", "")
+    from_date = request.args.get("start_date", "")
+    to_date = request.args.get("end_date", "")
 
     conn = get_db()
-    query = """
-        SELECT s.student_id, s.name, a.date, a.time
+
+    # 1. Every class date actually held for this subject (the columns).
+    sess_query = "SELECT date FROM sessions WHERE subject_id=?"
+    sess_params = [subject_id]
+    if from_date:
+        sess_query += " AND date >= ?"
+        sess_params.append(from_date)
+    if to_date:
+        sess_query += " AND date <= ?"
+        sess_params.append(to_date)
+    sess_query += " ORDER BY date ASC"
+    session_dates = [r["date"] for r in conn.execute(sess_query, sess_params).fetchall()]
+
+    # 2. Every student enrolled in this subject (the rows) — pulled via the
+    #    subject's course/year so students with zero check-ins still appear
+    #    (they'll just be Absent on every date).
+    sub_info = conn.execute(
+        "SELECT course, year FROM subjects WHERE subject_id=?", (subject_id,)
+    ).fetchone()
+    if sub_info:
+        students = conn.execute(
+            "SELECT student_id, name FROM students WHERE course=? AND year=? ORDER BY name ASC",
+            (sub_info["course"], sub_info["year"])
+        ).fetchall()
+    else:
+        students = []
+
+    # 3. Every check-in for this subject in range, to know who was present when.
+    att_query = """
+        SELECT a.student_id, a.date
         FROM attendance a
-        JOIN students s ON a.student_id = s.student_id
         WHERE a.subject_id=?
     """
-    params = [subject_id]
+    att_params = [subject_id]
     if from_date:
-        query += " AND a.date >= ?"
-        params.append(from_date)
+        att_query += " AND a.date >= ?"
+        att_params.append(from_date)
     if to_date:
-        query += " AND a.date <= ?"
-        params.append(to_date)
-    query += " ORDER BY a.date DESC, s.name ASC"
-    rows = conn.execute(query, params).fetchall()
+        att_query += " AND a.date <= ?"
+        att_params.append(to_date)
+    att_rows = conn.execute(att_query, att_params).fetchall()
     conn.close()
+
+    present_dates_by_student = {}
+    for r in att_rows:
+        present_dates_by_student.setdefault(r["student_id"], set()).add(r["date"])
 
     from flask import Response
     import csv, io
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Student ID", "Name", "Date", "Time"])
-    for r in rows:
-        writer.writerow([r["student_id"], r["name"], r["date"], r["time"]])
+    writer.writerow(["Student Name"] + session_dates + ["Days Present", "Total Days", "Attendance %"])
+
+    total_days = len(session_dates)
+    for stu in students:
+        present_set = present_dates_by_student.get(stu["student_id"], set())
+        row = [stu["name"]]
+        present_count = 0
+        for d in session_dates:
+            is_present = d in present_set
+            row.append("Present" if is_present else "Absent")
+            if is_present:
+                present_count += 1
+        pct = round((present_count / total_days) * 100) if total_days > 0 else 0
+        row += [present_count, total_days, f"{pct}%"]
+        writer.writerow(row)
     output.seek(0)
 
     fname_suffix = subject_id
@@ -647,6 +706,9 @@ def export_attendance():
         headers={"Content-Disposition": f"attachment;filename=attendance_{fname_suffix}.csv"}
     )
 
-
 if __name__ == "__main__":
     app.run(debug=True)
+    
+    #for runninf in mobile phone change the above code to:
+#if __name__ == "__main__":
+    #app.run(host="0.0.0.0", port=5000, debug=True, ssl_context="adhoc")
