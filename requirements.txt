@@ -6,3 +6,4 @@ opencv-python
 pyzbar
 openpyxl
 pyOpenSSL
+cryptography

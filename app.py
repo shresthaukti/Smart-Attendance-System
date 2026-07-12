@@ -284,16 +284,16 @@ def teacher_dashboard():
 
     if selected_sub:
         # Check if session is open
-        sub_session = conn.execute(
-            "SELECT session_id FROM sessions WHERE subject_id=? AND date=?",
-            (selected_sub, today)
-        ).fetchone()
-        if sub_session:
-            active = conn.execute(
-                "SELECT 1 FROM active_sessions WHERE session_id=?",
-                (sub_session["session_id"],)
-            ).fetchone()
-            session_open = active is not None
+        # Check if any active session exists for this subject today
+        session_open = conn.execute("""
+            SELECT 1
+            FROM active_sessions a
+            JOIN sessions s
+            ON a.session_id = s.session_id
+            WHERE s.subject_id = ?
+            AND s.date = ?
+            LIMIT 1
+        """, (selected_sub, today)).fetchone() is not None
 
         # Today's present students
         today_present = conn.execute("""
@@ -403,7 +403,7 @@ def api_open_session():
         return jsonify({"ok": False})
     data = request.json or {}
     subject_id = data.get("subject_id")
-    alternate = bool(data.get("alternate", False))
+    alternate = bool(data.get("is_alternate", False))
     if not subject_id:
         return jsonify({"ok": False, "message": "Missing subject_id"})
 
