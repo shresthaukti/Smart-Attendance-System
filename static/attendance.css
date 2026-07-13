@@ -253,6 +253,32 @@ h1 {
     box-shadow: 0 0 0 4px rgba(168,195,176,0.15);
 }
 
+/* ── Password show/hide toggle ── */
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 44px; }
+
+.toggle-eye {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 8px;
+    color: rgba(70,80,70,0.45);
+    border-radius: 8px;
+    transition: color 0.2s;
+}
+
+.toggle-eye:hover { color: rgba(70,80,70,0.8); }
+.toggle-eye svg { width: 18px; height: 18px; display: block; }
+
 .login-btn {
     width: 100%;
     padding: 14px;
@@ -753,4 +779,34 @@ tr:hover td { background: rgba(255,255,255,0.4); }
     .page-header h1 { font-size: 18px; }
 
     .camera-box { padding: 20px 14px; }
+
+    /* ── Touch targets — Apple/Material guidance is ~44px min ── */
+    .tab {
+        padding: 11px 16px;
+        min-height: 44px;
+        font-size: 13px;
+    }
+
+    .filter-btn,
+    .export-btn, .export-csv-btn,
+    .logout-btn {
+        min-height: 40px;
+        padding: 10px 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .filter-row input,
+    .filter-row select,
+    .subject-filter-row select,
+    .subject-filter-row input {
+        min-height: 40px;
+        font-size: 14px; /* 16px+ avoids iOS auto-zoom on focus; keep close */
+    }
+
+    table { font-size: 12px; }
+    th, td { padding: 8px 10px; }
+
+    .badge { padding: 5px 10px; font-size: 11px; }
 }
