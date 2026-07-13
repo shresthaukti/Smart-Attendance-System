@@ -205,17 +205,25 @@ def api_student_attendance():
     # Filter to one subject if requested
     target_subs = [subject_id] if (subject_id and subject_id in sub_ids) else list(sub_ids.keys())
 
-    # All sessions (class days) for these subjects
+    # All sessions (class days) for these subjects.
+    # DISTINCT + "did anyone actually scan that day" — same fix as CSV export:
+    # a test/alternate session opened with zero scans shouldn't create a
+    # row here, and re-opening one multiple times in a day shouldn't
+    # duplicate the row either.
     placeholders = ",".join("?" * len(target_subs))
     session_query = f"""
-        SELECT date, subject_id FROM sessions
-        WHERE subject_id IN ({placeholders})
+        SELECT DISTINCT s.date, s.subject_id FROM sessions s
+        WHERE s.subject_id IN ({placeholders})
+        AND EXISTS (
+            SELECT 1 FROM attendance a
+            WHERE a.subject_id = s.subject_id AND a.date = s.date
+        )
     """
     session_params = target_subs[:]
     if filter_date:
-        session_query += " AND date = ?"
+        session_query += " AND s.date = ?"
         session_params.append(filter_date)
-    session_query += " ORDER BY date DESC"
+    session_query += " ORDER BY s.date DESC"
     all_sessions = conn.execute(session_query, session_params).fetchall()
 
     # All attendance records for this student
@@ -406,6 +414,26 @@ def api_open_session():
     alternate = bool(data.get("is_alternate", False))
     if not subject_id:
         return jsonify({"ok": False, "message": "Missing subject_id"})
+
+    # Block silent auto-opening on non-routine days — teacher must explicitly
+    # tick "alternate/substitute class" if today isn't a scheduled day.
+    if not alternate:
+        conn = get_db()
+        sub = conn.execute(
+            "SELECT course, year FROM subjects WHERE subject_id=?", (subject_id,)
+        ).fetchone()
+        conn.close()
+        if not sub:
+            return jsonify({"ok": False, "message": "Subject not found"})
+
+        from database import get_routine_slot_for_today
+        day_name = date.today().strftime("%A")
+        routine_id = get_routine_slot_for_today(subject_id, sub["course"], sub["year"], day_name)
+        if routine_id is None:
+            return jsonify({
+                "ok": False,
+                "message": "This subject isn't on today's routine. Tick 'alternate/substitute class' to open it anyway."
+            })
 
     session_id = db.open_routine_or_alternate_session(subject_id, force_alternate=alternate)
     if session_id is None:
@@ -630,15 +658,25 @@ def export_attendance():
     conn = get_db()
 
     # 1. Every class date actually held for this subject (the columns).
-    sess_query = "SELECT date FROM sessions WHERE subject_id=?"
+    #    DISTINCT + "at least one scan happened" so opening a session just to
+    #    test something (no one scans) doesn't create a phantom Absent-only
+    #    column, and repeated test-opens on the same day don't duplicate it.
+    sess_query = """
+        SELECT DISTINCT s.date FROM sessions s
+        WHERE s.subject_id=?
+        AND EXISTS (
+            SELECT 1 FROM attendance a
+            WHERE a.subject_id = s.subject_id AND a.date = s.date
+        )
+    """
     sess_params = [subject_id]
     if from_date:
-        sess_query += " AND date >= ?"
+        sess_query += " AND s.date >= ?"
         sess_params.append(from_date)
     if to_date:
-        sess_query += " AND date <= ?"
+        sess_query += " AND s.date <= ?"
         sess_params.append(to_date)
-    sess_query += " ORDER BY date ASC"
+    sess_query += " ORDER BY s.date ASC"
     session_dates = [r["date"] for r in conn.execute(sess_query, sess_params).fetchall()]
 
     # 2. Every student enrolled in this subject (the rows) — pulled via the
