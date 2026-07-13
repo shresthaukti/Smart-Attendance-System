@@ -16,6 +16,7 @@ DB_FILE = os.path.join(os.path.dirname(__file__), "attendance.db")
 
 import database as db
 db.migrate_sessions_table()
+db.migrate_communication_tables()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -262,6 +263,253 @@ def api_student_attendance():
             })
 
     return jsonify(result)
+
+
+# ── NOTIFICATIONS AND CHAT ────────────────────────────────────────────────
+
+def _teacher_subjects(conn, teacher_id):
+    """Subjects owned by the signed-in teacher (the app stores teacher names on subjects)."""
+    return conn.execute(
+        """SELECT subject_id, subject_name, course, year FROM subjects
+           WHERE teacher_name = (SELECT name FROM teachers WHERE teacher_id=?)
+           ORDER BY subject_id""", (teacher_id,)
+    ).fetchall()
+
+
+@app.route("/api/notifications")
+def api_notifications():
+    if "student_id" not in session:
+        return jsonify([]), 401
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT notification_id, message, created_at FROM notifications
+           WHERE student_id=? AND read_at IS NULL AND expires_at > datetime('now')
+           ORDER BY created_at ASC""", (session["student_id"],)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/api/notifications/<int:notification_id>/read", methods=["POST"])
+def api_read_notification(notification_id):
+    if "student_id" not in session:
+        return jsonify({"ok": False}), 401
+    conn = get_db()
+    cur = conn.execute(
+        "UPDATE notifications SET read_at=CURRENT_TIMESTAMP WHERE notification_id=? AND student_id=?",
+        (notification_id, session["student_id"])
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": cur.rowcount == 1})
+
+
+@app.route("/student-chat")
+def student_chat():
+    if "student_id" not in session:
+        return redirect(url_for("student_login"))
+    conn = get_db()
+    student = conn.execute("SELECT name, course, year FROM students WHERE student_id=?", (session["student_id"],)).fetchone()
+    subjects = conn.execute(
+        """SELECT s.subject_id, s.subject_name, s.teacher_name, t.teacher_id
+           FROM subjects s JOIN teachers t ON trim(lower(t.name))=trim(lower(s.teacher_name))
+           WHERE s.course=? AND s.year=? ORDER BY s.subject_id""",
+        (student["course"], student["year"])
+    ).fetchall()
+    conn.close()
+    return render_template("studentchat.html", student=student, subjects=subjects)
+
+
+@app.route("/teacher-chat")
+def teacher_chat():
+    if "teacher_id" not in session:
+        return redirect(url_for("teacher_login"))
+    conn = get_db()
+    subjects = _teacher_subjects(conn, session["teacher_id"])
+    conn.close()
+    return render_template("teacherchat.html", teacher_name=session["teacher_name"], subjects=subjects)
+
+
+@app.route("/api/chat/student/messages")
+def api_student_messages():
+    if "student_id" not in session:
+        return jsonify([]), 401
+    subject_id = request.args.get("subject", "")
+    conn = get_db()
+    params = [session["student_id"]]
+    where = "student_id=?"
+    if subject_id:
+        where += " AND subject_id=?"
+        params.append(subject_id)
+    # Reading a conversation clears only messages actually delivered to this student.
+    conn.execute(f"UPDATE chat_messages SET read_at=CURRENT_TIMESTAMP WHERE {where} AND sender_role='teacher' AND read_at IS NULL", params)
+    rows = conn.execute(
+        f"""SELECT message_id, subject_id, sender_role,
+                   CASE WHEN unsent_at IS NULL THEN body ELSE 'Message unsent.' END AS body,
+                   created_at, unsent_at
+            FROM chat_messages WHERE {where} ORDER BY created_at ASC, message_id ASC""", params
+    ).fetchall()
+    conn.commit()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/api/chat/student/conversations")
+def api_student_conversations():
+    """One private inbox row for each teacher/class available to this student."""
+    if "student_id" not in session:
+        return jsonify([]), 401
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT s.subject_id, s.subject_name, s.teacher_name,
+                   SUM(CASE WHEN m.sender_role='teacher' AND m.read_at IS NULL
+                                  AND m.unsent_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
+                   MAX(m.created_at) AS last_message_at
+            FROM subjects s
+            JOIN students st ON st.student_id=? AND s.course=st.course AND s.year=st.year
+            JOIN teachers t ON trim(lower(t.name))=trim(lower(s.teacher_name))
+            LEFT JOIN chat_messages m ON m.student_id=st.student_id
+                                     AND m.teacher_id=t.teacher_id AND m.subject_id=s.subject_id
+            GROUP BY s.subject_id, s.subject_name, s.teacher_name
+            ORDER BY unread_count DESC, last_message_at DESC, s.teacher_name""",
+        (session["student_id"],)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/api/chat/student/send", methods=["POST"])
+def api_student_send():
+    if "student_id" not in session:
+        return jsonify({"ok": False, "message": "Please sign in."}), 401
+    data = request.get_json() or {}
+    subject_id, body = data.get("subject_id", "").strip(), data.get("body", "").strip()
+    if not subject_id or not body or len(body) > 1000:
+        return jsonify({"ok": False, "message": "Choose a class and enter a message up to 1000 characters."}), 400
+    conn = get_db()
+    row = conn.execute(
+        """SELECT t.teacher_id FROM subjects s JOIN students st ON st.student_id=?
+           JOIN teachers t ON trim(lower(t.name))=trim(lower(s.teacher_name))
+           WHERE s.subject_id=? AND s.course=st.course AND s.year=st.year""",
+        (session["student_id"], subject_id)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"ok": False, "message": "That class or teacher is unavailable."}), 403
+    cur = conn.execute(
+        """INSERT INTO chat_messages (student_id, teacher_id, subject_id, sender_role, body)
+           VALUES (?, ?, ?, 'student', ?)""", (session["student_id"], row["teacher_id"], subject_id, body)
+    )
+    conn.commit()
+    message_id = cur.lastrowid
+    conn.close()
+    return jsonify({"ok": True, "message_id": message_id})
+
+
+@app.route("/api/chat/student/unsend/<int:message_id>", methods=["POST"])
+def api_student_unsend(message_id):
+    if "student_id" not in session:
+        return jsonify({"ok": False}), 401
+    conn = get_db()
+    cur = conn.execute(
+        """UPDATE chat_messages SET unsent_at=CURRENT_TIMESTAMP, body=''
+           WHERE message_id=? AND student_id=? AND sender_role='student' AND unsent_at IS NULL""",
+        (message_id, session["student_id"])
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": cur.rowcount == 1})
+
+
+@app.route("/api/chat/teacher/messages")
+def api_teacher_messages():
+    if "teacher_id" not in session:
+        return jsonify([]), 401
+    subject_id = request.args.get("subject", "")
+    student_id = request.args.get("student_id", "")
+    if not student_id:
+        return jsonify([])
+    conn = get_db()
+    params = [session["teacher_id"], student_id]
+    where = "m.teacher_id=? AND m.student_id=?"
+    if subject_id:
+        where += " AND m.subject_id=?"
+        params.append(subject_id)
+    conn.execute(f"UPDATE chat_messages AS m SET read_at=CURRENT_TIMESTAMP WHERE {where} AND sender_role='student' AND read_at IS NULL", params)
+    rows = conn.execute(
+        f"""SELECT m.message_id, m.student_id, st.name AS student_name, m.subject_id,
+                   m.sender_role, CASE WHEN m.unsent_at IS NULL THEN m.body ELSE 'Message unsent.' END AS body,
+                   m.created_at, m.unsent_at
+            FROM chat_messages m JOIN students st ON st.student_id=m.student_id
+            WHERE {where} ORDER BY m.created_at ASC, m.message_id ASC""", params
+    ).fetchall()
+    conn.commit()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/api/chat/teacher/conversations")
+def api_teacher_conversations():
+    """Private student conversations; optional class filter is for the teacher inbox."""
+    if "teacher_id" not in session:
+        return jsonify([]), 401
+    subject_id = request.args.get("subject", "")
+    conn = get_db()
+    params = [session["teacher_id"]]
+    where = "m.teacher_id=?"
+    if subject_id:
+        where += " AND m.subject_id=?"
+        params.append(subject_id)
+    rows = conn.execute(
+        f"""SELECT m.student_id, st.name AS student_name, m.subject_id,
+                   MAX(m.created_at) AS last_message_at,
+                   SUM(CASE WHEN m.sender_role='student' AND m.read_at IS NULL
+                                  AND m.unsent_at IS NULL THEN 1 ELSE 0 END) AS unread_count
+            FROM chat_messages m JOIN students st ON st.student_id=m.student_id
+            WHERE {where}
+            GROUP BY m.student_id, st.name, m.subject_id
+            ORDER BY unread_count DESC, last_message_at DESC, st.name""", params
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/api/chat/teacher/reply", methods=["POST"])
+def api_teacher_reply():
+    if "teacher_id" not in session:
+        return jsonify({"ok": False}), 401
+    data = request.get_json() or {}
+    student_id, subject_id, body = data.get("student_id", "").strip(), data.get("subject_id", "").strip(), data.get("body", "").strip()
+    if not student_id or not subject_id or not body or len(body) > 1000:
+        return jsonify({"ok": False, "message": "Select a student and enter a message up to 1000 characters."}), 400
+    conn = get_db()
+    allowed = conn.execute(
+        """SELECT 1 FROM subjects s JOIN students st ON st.student_id=?
+           WHERE s.subject_id=? AND s.teacher_name=(SELECT name FROM teachers WHERE teacher_id=?)
+             AND s.course=st.course AND s.year=st.year""", (student_id, subject_id, session["teacher_id"])
+    ).fetchone()
+    if not allowed:
+        conn.close()
+        return jsonify({"ok": False, "message": "You can only reply to students in your classes."}), 403
+    conn.execute("""INSERT INTO chat_messages (student_id, teacher_id, subject_id, sender_role, body)
+                    VALUES (?, ?, ?, 'teacher', ?)""", (student_id, session["teacher_id"], subject_id, body))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/chat/unread-count")
+def api_chat_unread_count():
+    conn = get_db()
+    if "student_id" in session:
+        count = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE student_id=? AND sender_role='teacher' AND read_at IS NULL AND unsent_at IS NULL", (session["student_id"],)).fetchone()[0]
+    elif "teacher_id" in session:
+        count = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE teacher_id=? AND sender_role='student' AND read_at IS NULL AND unsent_at IS NULL", (session["teacher_id"],)).fetchone()[0]
+    else:
+        conn.close()
+        return jsonify({"count": 0}), 401
+    conn.close()
+    return jsonify({"count": count})
 
 
 # ── TEACHER DASHBOARD ────────────────────────────────────────────────────────

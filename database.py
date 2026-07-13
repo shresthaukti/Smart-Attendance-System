@@ -9,7 +9,10 @@ DB_FILE = "attendance.db"
 
 def hash_password(plain_password: str) -> str:
     """Hash a plain-text password using bcrypt. Returns a UTF-8 string for storage."""
-    salt = bcrypt.gensalt()
+    # Cost 10 keeps password hashing secure for this local school project
+    # while allowing Excel imports to finish promptly on typical laptops.
+    # bcrypt can still verify hashes made with any previous cost factor.
+    salt = bcrypt.gensalt(rounds=10)
     hashed = bcrypt.hashpw(plain_password.encode("utf-8"), salt)
     return hashed.decode("utf-8")
 
@@ -133,6 +136,8 @@ def create_database():
         )
     """)
 
+    _create_communication_tables(cursor)
+
     # ROUTINE TABLE — class timetable (drives the routine view shown to students/teachers)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS routine (
@@ -159,41 +164,114 @@ def create_database():
     print("  - active_sessions table")
     print("  - teachers table (bcrypt passwords)")
     print("  - routine table")
+    print("  - chat_messages table")
+    print("  - notifications table")
 
 
-# --- FACE DATA UTILITIES ---
-
-def register_student_face(student_id: str, image_path: str, embedding_array: np.ndarray):
-    """Saves a processed face vector embedding blob directly into SQLite."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    binary_embedding = embedding_array.tobytes() # Convert vector array to storage bytes
-    
+def _create_communication_tables(cursor):
+    """Create the schema used by the notification and two-way chat pages."""
     cursor.execute("""
-        INSERT INTO student_faces (student_id, image_path, embedding)
-        VALUES (?, ?, ?)
-    """, (student_id, image_path, binary_embedding))
-    conn.commit()
-    conn.close()
-
-def load_known_face_dataset():
-    """Fetches all face vectors into local memory cache for ultra-fast matching matrix operations."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT sf.student_id, s.name, sf.embedding 
-        FROM student_faces sf
-        JOIN students s ON sf.student_id = s.student_id
+        CREATE TABLE IF NOT EXISTS notifications (
+            notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id TEXT NOT NULL,
+            subject_id TEXT NOT NULL,
+            attendance_date TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT NOT NULL,
+            read_at TEXT,
+            UNIQUE(student_id, subject_id, attendance_date),
+            FOREIGN KEY(student_id) REFERENCES students(student_id),
+            FOREIGN KEY(subject_id) REFERENCES subjects(subject_id)
+        )
     """)
-    rows = cursor.fetchall()
-    conn.close()
-    
-    dataset = {}
-    for student_id, name, blob in rows:
-        # Convert raw database binary structure safely back to full 512-D float32 arrays
-        vector = np.frombuffer(blob, dtype=np.float32)
-        dataset[student_id] = {"name": name, "embedding": vector}
-    return dataset
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id TEXT NOT NULL,
+            teacher_id INTEGER NOT NULL,
+            subject_id TEXT NOT NULL,
+            sender_role TEXT NOT NULL CHECK(sender_role IN ('student', 'teacher')),
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            read_at TEXT,
+            unsent_at TEXT,
+            FOREIGN KEY(student_id) REFERENCES students(student_id),
+            FOREIGN KEY(teacher_id) REFERENCES teachers(teacher_id),
+            FOREIGN KEY(subject_id) REFERENCES subjects(subject_id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_student ON notifications(student_id, expires_at, read_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_student ON chat_messages(student_id, created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_teacher ON chat_messages(teacher_id, subject_id, created_at)")
+
+
+def migrate_communication_tables():
+    """Upgrade the earlier prototype tables without discarding its messages."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        tables = {row[0] for row in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        migrate_notifications = False
+        migrate_chat = False
+        if "notifications" in tables:
+            notification_columns = {row[1] for row in cursor.execute("PRAGMA table_info(notifications)")}
+            if "attendance_date" not in notification_columns:
+                cursor.execute("ALTER TABLE notifications RENAME TO notifications_legacy")
+                migrate_notifications = True
+        if "chat_messages" in tables:
+            chat_columns = {row[1] for row in cursor.execute("PRAGMA table_info(chat_messages)")}
+            if "student_id" not in chat_columns:
+                cursor.execute("ALTER TABLE chat_messages RENAME TO chat_messages_legacy")
+                migrate_chat = True
+        _create_communication_tables(cursor)
+        if migrate_notifications:
+            cursor.execute("""
+                INSERT INTO notifications
+                (notification_id, student_id, subject_id, attendance_date, message, created_at, expires_at, read_at)
+                SELECT notification_id, student_id, COALESCE(subject_id, ''), date(created_at), message,
+                       created_at, datetime(created_at, '+1 day'),
+                       CASE WHEN is_read THEN created_at ELSE NULL END
+                FROM notifications_legacy
+            """)
+        if migrate_chat:
+            cursor.execute("""
+                INSERT INTO chat_messages
+                (message_id, student_id, teacher_id, subject_id, sender_role, body, created_at, read_at)
+                SELECT message_id,
+                       CASE WHEN sender_type='student' THEN sender_id ELSE receiver_id END,
+                       CAST(CASE WHEN sender_type='teacher' THEN sender_id ELSE receiver_id END AS INTEGER),
+                       subject_id, sender_type, message, sent_at,
+                       CASE WHEN is_read THEN sent_at ELSE NULL END
+                FROM chat_messages_legacy
+                WHERE sender_type IN ('student', 'teacher')
+            """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def create_attendance_notification(student_id, subject_id, attendance_date=None):
+    """Create one unread attendance alert which expires after 24 hours."""
+    attendance_date = attendance_date or str(date_class.today())
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        subject = conn.execute("SELECT subject_name FROM subjects WHERE subject_id=?", (subject_id,)).fetchone()
+        subject_name = subject[0] if subject else subject_id
+        conn.execute(
+            """INSERT OR IGNORE INTO notifications
+               (student_id, subject_id, attendance_date, message, expires_at)
+               VALUES (?, ?, ?, ?, datetime('now', '+1 day'))""",
+            (student_id, subject_id, attendance_date,
+             f"Your attendance has been marked for {subject_id} — {subject_name}.")
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+
+
 
 def save_attendance_record(student_id: str, subject_id: str):
     """Inserts a safe transaction stamp into the attendance engine log."""
@@ -213,6 +291,8 @@ def save_attendance_record(student_id: str, subject_id: str):
         success = False # Handled by database unique constraint check
     finally:
         conn.close()
+    if success:
+        create_attendance_notification(student_id, subject_id, today_str)
     return success
 
 def log_unrecognized_detection(image_path: str):
@@ -856,6 +936,240 @@ def open_routine_or_alternate_session(subject_id, room=None, force_alternate=Fal
 
     conn.close()
     return session_id
+
+def send_chat_message(sender_id,
+                      sender_type,
+                      receiver_id,
+                      receiver_type,
+                      subject_id,
+                      message):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO chat_messages
+        (sender_id,
+         sender_type,
+         receiver_id,
+         receiver_type,
+         subject_id,
+         message)
+
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        sender_id,
+        sender_type,
+        receiver_id,
+        receiver_type,
+        subject_id,
+        message
+    ))
+
+    conn.commit()
+    conn.close()
+
+def get_chat(student_id, teacher_id, subject_id):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        SELECT
+            sender_id,
+            sender_type,
+            message,
+            sent_at
+
+        FROM chat_messages
+
+        WHERE
+
+        subject_id=?
+
+        AND
+
+        (
+            (sender_id=? AND receiver_id=?)
+
+            OR
+
+            (sender_id=? AND receiver_id=?)
+        )
+
+        ORDER BY sent_at ASC
+
+    """,
+    (
+        subject_id,
+        student_id,
+        teacher_id,
+        teacher_id,
+        student_id
+    ))
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+def get_messages_by_subject(subject_id):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        SELECT *
+
+        FROM chat_messages
+
+        WHERE subject_id=?
+
+        ORDER BY sent_at DESC
+
+    """,(subject_id,))
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+def get_teacher_messages(teacher_id):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        SELECT *
+
+        FROM chat_messages
+
+        WHERE receiver_id=?
+           OR sender_id=?
+
+        ORDER BY sent_at DESC
+
+    """,(teacher_id,teacher_id))
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+def add_notification(student_id,
+                     subject_id,
+                     title,
+                     message):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        INSERT INTO notifications
+
+        (
+            student_id,
+            subject_id,
+            title,
+            message
+        )
+
+        VALUES
+
+        (?, ?, ?, ?)
+
+    """,(student_id,
+         subject_id,
+         title,
+         message))
+
+    conn.commit()
+    conn.close()
+
+
+def get_notifications(student_id):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        SELECT
+
+        notification_id,
+        title,
+        message,
+        created_at,
+        is_read
+
+        FROM notifications
+
+        WHERE student_id=?
+
+        ORDER BY created_at DESC
+
+    """,(student_id,))
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+def get_unread_notification_count(student_id):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        SELECT COUNT(*)
+
+        FROM notifications
+
+        WHERE student_id=?
+
+        AND is_read=0
+
+    """,(student_id,))
+
+    count = cursor.fetchone()[0]
+
+    conn.close()
+
+    return count
+
+def get_unread_chat_count(user_id):
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+
+        SELECT COUNT(*)
+
+        FROM chat_messages
+
+        WHERE receiver_id=?
+
+        AND is_read=0
+
+    """,(user_id,))
+
+    count = cursor.fetchone()[0]
+
+    conn.close()
+
+    return count
+
 
 
 def close_active_session_by_id(session_id):

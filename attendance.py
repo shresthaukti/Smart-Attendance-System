@@ -25,6 +25,10 @@ def process_scan(student_id, subject_id):
         )
         conn.commit()
         conn.close()
+        # Keep notifications coupled to successful attendance records, no
+        # matter whether the scan comes from the dashboard or phone client.
+        import database as db
+        db.create_attendance_notification(student_id, subject_id, today)
         return "G"  
     except sqlite3.IntegrityError:
         conn.close()

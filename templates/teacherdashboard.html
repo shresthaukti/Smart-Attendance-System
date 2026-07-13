@@ -38,6 +38,8 @@
         .export-csv-btn:hover { background:rgba(100,140,110,0.28); }
         .scanner-controls { margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
         .scanner-controls input { padding:7px 12px; border-radius:8px; border:1px solid rgba(120,130,120,0.25); font-family:'Poppins',sans-serif; font-size:12px; flex:1; min-width:160px; outline:none; }
+        .chat-link { position:relative; text-decoration:none; color:#46524a; background:rgba(142,168,145,.18); padding:7px 11px; border-radius:9px; font-size:12px; font-weight:600; }
+        .chat-count { display:none; position:absolute; top:-7px; right:-7px; min-width:17px; height:17px; border-radius:10px; background:#b35d5d; color:#fff; font-size:10px; text-align:center; line-height:17px; }
         @keyframes scanAnim { 0%{top:15%} 50%{top:85%} 100%{top:15%} }
 
         @media (max-width: 480px) {
@@ -68,6 +70,7 @@
         <div class="nav-title">Smart Attendance<span>Kathmandu University</span></div>
     </div>
     <div class="nav-right">
+        <a href="/teacher-chat" class="chat-link">💬 Chat<span id="chatCount" class="chat-count"></span></a>
         <span class="teacher-badge">👨‍🏫 {{ teacher_name }}</span>
         <a href="/teacher-logout" class="logout-btn">← Logout</a>
     </div>
@@ -560,6 +563,10 @@ function refreshLiveTable() {
         });
 }
 if (SELECTED_SUB) setInterval(refreshLiveTable, 5000);
+</script>
+<script>
+async function updateChatCount() { try { const d=await fetch('/api/chat/unread-count').then(r=>r.json()); const el=document.getElementById('chatCount'); el.textContent=d.count||''; el.style.display=d.count?'block':'none'; } catch(e) {} }
+updateChatCount(); setInterval(updateChatCount, 10000);
 </script>
 
 </body>
