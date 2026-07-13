@@ -1,5 +1,6 @@
 flask
 werkzeug==3.0.0
+gunicorn
 numpy
 bcrypt
 opencv-python
