@@ -36,7 +36,28 @@
         .export-row input[type=date] { padding:6px 10px; border-radius:8px; border:1px solid rgba(120,130,120,0.25); font-family:'Poppins',sans-serif; font-size:11px; color:#46524a; outline:none; }
         .export-csv-btn { padding:7px 14px; border-radius:10px; background:rgba(100,140,110,0.15); border:1px solid rgba(100,140,110,0.3); color:#4a7a5a; font-size:12px; font-weight:600; text-decoration:none; font-family:'Poppins',sans-serif; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
         .export-csv-btn:hover { background:rgba(100,140,110,0.28); }
+        .scanner-controls { margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .scanner-controls input { padding:7px 12px; border-radius:8px; border:1px solid rgba(120,130,120,0.25); font-family:'Poppins',sans-serif; font-size:12px; flex:1; min-width:160px; outline:none; }
         @keyframes scanAnim { 0%{top:15%} 50%{top:85%} 100%{top:15%} }
+
+        @media (max-width: 480px) {
+            /* Session open/close, start/stop scan — bump to a real tap target */
+            .session-btn { padding:12px 18px; min-height:44px; font-size:13px; }
+            .routine-btn { padding:10px 14px; min-height:44px; font-size:12px; }
+
+            /* Checkbox row — enlarge the box itself and give the whole row
+               padding so the label is one comfortable tap target, not a
+               14px square you have to hit precisely. */
+            .alt-class-row { padding:8px 0; }
+            .alt-class-row input[type=checkbox] { width:20px; height:20px; }
+
+            /* Scanner controls: IP input + Start/Stop cramped into one row
+               on a phone-width screen. Stack the input full-width, then
+               the buttons full-width side by side beneath it. */
+            .scanner-controls { flex-direction:column; align-items:stretch; }
+            .scanner-controls input { min-width:0; min-height:44px; font-size:14px; }
+            .scanner-controls .session-btn { flex:1; }
+        }
     </style>
 </head>
 <body class="dashboard">
@@ -245,9 +266,8 @@
             <!-- Barcode Scanner -->
             <div class="dash-card">
                 <h2>📷 Barcode Scanner</h2>
-                <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                    <input id="droidcamIp" type="text" placeholder="DroidCam IP or type 'webcam'"
-                        style="padding:7px 12px;border-radius:8px;border:1px solid rgba(120,130,120,0.25);font-family:'Poppins',sans-serif;font-size:12px;flex:1;min-width:160px;outline:none;">
+                <div class="scanner-controls">
+                    <input id="droidcamIp" type="text" placeholder="DroidCam IP or type 'webcam'">
                     <button onclick="startScanner()" class="session-btn btn-open" id="startScanBtn">▶ Start</button>
                     <button onclick="stopScanner()" class="session-btn btn-close" id="stopScanBtn" style="display:none;">■ Stop</button>
                 </div>
@@ -400,10 +420,31 @@ async function startScanner() {
 
     if (ip === 'webcam') {
         try {
-            scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            scannerStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width:  { ideal: 1920 },
+                    height: { ideal: 1080 },
+                    // Some Android/Chrome builds accept this as a standard
+                    // constraint; harmless no-op where unsupported.
+                    focusMode: { ideal: 'continuous' }
+                }
+            });
             video.srcObject = scannerStream;
             video.style.display = 'block';  // show video directly
             await video.play();
+
+            // Explicitly push continuous autofocus to the track if the
+            // browser exposes it (Chrome/Android). Without this, phone
+            // browser cameras often lock focus at a distance meant for
+            // video calls and can't rack focus for a card held close up —
+            // this is the main reason DroidCam (native camera API) scans
+            // fine up close while the plain browser camera doesn't.
+            const track = scannerStream.getVideoTracks()[0];
+            const caps  = track.getCapabilities ? track.getCapabilities() : {};
+            if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+            }
         } catch (e) { alert('Could not access webcam: ' + e.message); return; }
 
         scannerInterval = setInterval(() => {
