@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='attendance.css') }}">
     <style>
-        .subject-filter-row { display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap; }
+        .subject-filter-row { display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap; max-width:100%; }
         .subject-filter-row select { padding:8px 14px; border-radius:8px; border:1px solid rgba(120,130,120,0.2); font-family:'Poppins',sans-serif; font-size:13px; color:#46524a; background:rgba(255,255,255,0.6); outline:none; cursor:pointer; }
         .sub-stat-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(195px,1fr)); gap:12px; margin-top:4px; }
         .sub-stat-card { background:rgba(255,255,255,0.5); border:1px solid rgba(120,130,120,0.14); border-radius:12px; padding:14px; }
@@ -152,7 +152,7 @@
     <!-- Class Routine — CE-II/II timetable (from database) -->
     <div class="dash-card">
         <h2>📅 Class Routine — KU DoCSE CE Year II (Semester II)</h2>
-        <p style="font-size:12px;color:rgba(70,80,70,0.5);margin-bottom:14px;">Effective May 14, 2026 · Group: CE-II/II</p>
+        <p style="font-size:12px;color:rgba(70,80,70,0.5);margin-bottom:14px;">Group: CE-II/II </p>
 
         {% set days_order = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] %}
         {% set time_slots = routine | map(attribute='start_time') | unique | list | sort %}
@@ -192,7 +192,7 @@
         </div>
 
         <p class="ku-credit">
-            Source: <a href="https://docse.netlify.app/docse_routine_may_14_2026_master_groups_days_vertical#table_21" target="_blank">KU DoCSE Official Routine (May 14, 2026)</a>
+            Source: <a href="{{ url_for('static', filename='routine.html') }}" target="_blank">KU DoCSE Official Routine (May 14, 2026)</a>
         </p>
     </div>
 
