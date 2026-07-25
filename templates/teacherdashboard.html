@@ -270,9 +270,18 @@
             <div class="dash-card">
                 <h2>📷 Barcode Scanner</h2>
                 <div class="scanner-controls">
-                    <input id="droidcamIp" type="text" placeholder="DroidCam IP or type 'webcam'">
-                    <button onclick="startScanner()" class="session-btn btn-open" id="startScanBtn">▶ Start</button>
-                    <button onclick="stopScanner()" class="session-btn btn-close" id="stopScanBtn" style="display:none;">■ Stop</button>
+                <button id="startScanBtn"
+                        onclick="startScanner()"
+                        class="session-btn btn-open">
+                    ▶ Start
+                </button>
+
+                <button id="stopScanBtn"
+                        onclick="stopScanner()"
+                        class="session-btn btn-close"
+                        style="display:none;">
+                    ■ Stop
+                </button>
                 </div>
 
                 <!-- Camera container -->
@@ -282,7 +291,7 @@
                     <canvas id="scannerCanvas" style="display:none;"></canvas>
                     <div id="cameraPlaceholder" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 0;color:rgba(255,255,255,0.4);font-size:13px;gap:8px;">
                         <div style="font-size:36px;">📷</div>
-                        <div>Enter DroidCam IP or "webcam" and press Start</div>
+                        <div>Press Start to begin scanning</div>
                     </div>
                     <div id="scanLine" style="display:none;position:absolute;left:0;right:0;top:40%;height:2px;background:rgba(100,220,100,0.7);box-shadow:0 0 8px rgba(100,220,100,0.8);animation:scanAnim 2s linear infinite;pointer-events:none;"></div>
                 </div>
@@ -404,97 +413,106 @@ function getSelectedSubject() {
 }
 
 async function startScanner() {
-    const ip          = document.getElementById('droidcamIp').value.trim();
-    if (!ip) { alert('Enter DroidCam IP or type "webcam"'); return; }
+    const isMobile = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile/i.test(navigator.userAgent);
+    const deviceType = isMobile ? "phone" : "laptop";
 
-    const video       = document.getElementById('scannerVideo');
-    const canvas      = document.getElementById('scannerCanvas');
-    const container   = document.getElementById('cameraContainer');
-    const placeholder = document.getElementById('cameraPlaceholder');
-    const scanLine    = document.getElementById('scanLine');
 
-    placeholder.style.display = 'none';
-    scanLine.style.display    = 'block';
-    document.getElementById('startScanBtn').style.display = 'none';
-    document.getElementById('stopScanBtn').style.display  = 'inline-flex';
-    document.getElementById('recentScans').style.display  = 'block';
+    const video = document.getElementById("scannerVideo");
+    const canvas = document.getElementById("scannerCanvas");
+    const placeholder = document.getElementById("cameraPlaceholder");
+    const scanLine = document.getElementById("scanLine");
 
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    placeholder.style.display = "none";
+    scanLine.style.display = "block";
+    document.getElementById("startScanBtn").style.display = "none";
+    document.getElementById("stopScanBtn").style.display = "inline-flex";
+    document.getElementById("recentScans").style.display = "block";
 
-    if (ip === 'webcam') {
-        try {
-            scannerStream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width:  { ideal: 1920 },
-                    height: { ideal: 1080 },
-                    // Some Android/Chrome builds accept this as a standard
-                    // constraint; harmless no-op where unsupported.
-                    focusMode: { ideal: 'continuous' }
-                }
-            });
-            video.srcObject = scannerStream;
-            video.style.display = 'block';  // show video directly
-            await video.play();
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-            // Explicitly push continuous autofocus to the track if the
-            // browser exposes it (Chrome/Android). Without this, phone
-            // browser cameras often lock focus at a distance meant for
-            // video calls and can't rack focus for a card held close up —
-            // this is the main reason DroidCam (native camera API) scans
-            // fine up close while the plain browser camera doesn't.
-            const track = scannerStream.getVideoTracks()[0];
-            const caps  = track.getCapabilities ? track.getCapabilities() : {};
-            if (caps.focusMode && caps.focusMode.includes('continuous')) {
-                try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
-            }
-        } catch (e) { alert('Could not access webcam: ' + e.message); return; }
+    let constraints = {
+        video: {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+        }
+    };
 
-        scannerInterval = setInterval(() => {
-            if (!video.videoWidth) return;
-            canvas.width  = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(async blob => {
-                try {
-                    const fd = new FormData();
-                    fd.append('frame', blob, 'frame.jpg');
-                    const r    = await fetch('/api/decode-frame', { method: 'POST', body: fd });
-                    const data = await r.json();
-                    if (data.success) handleBarcode(data.barcode);
-                } catch(e) {}
-            }, 'image/jpeg', 0.9);
-        }, 150);
-
-    } else {
-        // DroidCam — show the MJPEG stream as a visible <img>, use hidden canvas for decoding
-        const img    = document.createElement('img');
-        img.id       = 'droidcamImg';
-        img.crossOrigin = 'anonymous';
-        img.src      = `http://${ip}:4747/mjpegfeed`;
-        img.style.cssText = 'width:100%;height:auto;display:block;border-radius:0;';
-        // Insert before canvas so it's visible
-        container.insertBefore(img, canvas);
-        // canvas stays hidden — only used for frame capture
-        canvas.style.display = 'none';
-
-        scannerInterval = setInterval(() => {
-            const source = document.getElementById('droidcamImg');
-            if (!source || !source.naturalWidth) return;
-            canvas.width  = source.naturalWidth;
-            canvas.height = source.naturalHeight;
-            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(async blob => {
-                try {
-                    const fd = new FormData();
-                    fd.append('frame', blob, 'frame.jpg');
-                    const r    = await fetch('/api/decode-frame', { method: 'POST', body: fd });
-                    const data = await r.json();
-                    if (data.success) handleBarcode(data.barcode);
-                } catch(e) {}
-            }, 'image/jpeg', 0.9);
-        }, 150);
+    // Phone → rear camera
+    if (deviceType === "phone") {
+        constraints.video.facingMode = { ideal: "environment" };
     }
+
+    // Laptop → default camera
+    if (deviceType === "laptop") {
+        constraints.video.facingMode = "user";
+    }
+
+    try {
+
+        scannerStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        video.srcObject = scannerStream;
+        video.style.display = "block";
+        await video.play();
+
+        // Continuous autofocus (supported browsers only)
+        const track = scannerStream.getVideoTracks()[0];
+
+        if (track.getCapabilities) {
+            const caps = track.getCapabilities();
+
+            if (caps.focusMode &&
+                caps.focusMode.includes("continuous")) {
+
+                try {
+                    await track.applyConstraints({
+                        advanced: [{ focusMode: "continuous" }]
+                    });
+                } catch (e) {}
+            }
+        }
+
+    } catch (err) {
+        alert("Camera access denied: " + err.message);
+        stopScanner();
+        return;
+    }
+
+    // Decode frames
+    scannerInterval = setInterval(() => {
+
+        if (!video.videoWidth) return;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        ctx.drawImage(video, 0, 0);
+
+        canvas.toBlob(async blob => {
+
+            try {
+
+                const fd = new FormData();
+                fd.append("frame", blob, "frame.jpg");
+
+                const response = await fetch("/api/decode-frame", {
+                    method: "POST",
+                    body: fd
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    handleBarcode(data.barcode);
+                }
+
+            } catch (e) {
+                console.error(e);
+            }
+
+        }, "image/jpeg", 0.9);
+
+    }, 150);
 }
 
 function stopScanner() {
