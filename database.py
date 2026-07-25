@@ -438,9 +438,13 @@ def import_teachers_from_excel(filepath: str) -> dict:
 
         try:
             cursor.execute(
-                """INSERT OR IGNORE INTO teachers
-                   (name, username, password, email, phone, department)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO teachers (name, username, password, email, phone, department)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET
+                    name=excluded.name,
+                    email=excluded.email,
+                    phone=excluded.phone,
+                    department=excluded.department""",
                 (
                     str(name).strip(),
                     str(username).strip(),
@@ -1243,35 +1247,39 @@ def populate_ce2_data():
     course, year, section = "CE", 2, "CE-II/II"
 
     subjects = [
-        ("COMP232", "Database Management Systems",      course, year, "9-404", "Mr. Bipesh Subedi"),
-        ("COMP204", "Data Communication and Networking", course, year, "10-103", "Mr. Gobinda Subedi"),
-        ("COMP231", "Microprocessor and Assembly Language", course, year, "9-402", "Prof. Dr. Gajendra Sharma"),
-        ("MATH207", "Differential Equations and Complex Variables",           course, year, "9-302 (Computer Lab)", "Mohan Chandra Adhikari"),
-        ("MCSC202", "Numerical Methods",    course, year, "9-402", "Dr. Sushil Ghimire"),
+        ("COMP232", "Database Management Systems",      course, year, "9-406", "Mr. Rajan Thapa"),
+        ("COMP204", "Data Communication and Networking", course, year, "10-108", "Mr. Josh Karki"),
+        ("COMP231", "Microprocessor and Assembly Language", course, year, "9-405", "Prof. Dr. Krishna Basnet"),
+        ("MATH207", "Differential Equations and Complex Variables",           course, year, "9-305", "Mohan Bahadur Rai"),
+        ("MCSC202", "Numerical Methods",    course, year, "9-405", "Dr. Kishor Poudel"),
     ]
     for sub in subjects:
         cursor.execute(
-            """INSERT OR IGNORE INTO subjects
-               (subject_id, subject_name, course, year, room, teacher_name)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            sub
-        )
+                """INSERT INTO subjects (subject_id, subject_name, course, year, room, teacher_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(subject_id) DO UPDATE SET
+                    subject_name=excluded.subject_name,
+                    course=excluded.course,
+                    year=excluded.year,
+                    room=excluded.room,
+                    teacher_name=excluded.teacher_name""",
+                sub
+            )
 
-    # Clear any previously-seeded CE-II/II routine rows so this is re-runnable
     cursor.execute("DELETE FROM routine WHERE course = ? AND year = ? AND section = ?", (course, year, section))
 
     # (day, start, end, subject_id, room)
     routine_rows = [
-        ("Tuesday",   "09:00", "10:00", "COMP232", "9-404"),
-        ("Tuesday",   "12:00", "13:00", "COMP204", "10-103"),
-        ("Wednesday", "11:00", "12:00", "MATH207", "9-302 (Computer Lab)"),
-        ("Wednesday", "14:00", "15:00", "COMP204", "9-402"),
-        ("Thursday",  "09:00", "10:00", "MCSC202", "9-402"),
-        ("Thursday",  "12:00", "13:00", "COMP231", "9-402"),
-        ("Thursday",  "14:00", "15:00", "MATH207", "9-402"),
-        ("Friday",    "09:00", "10:00", "COMP232", "9-402"),
-        ("Friday",    "12:00", "13:00", "COMP231", "9-310"),
-        ("Friday",    "14:00", "15:00", "MCSC202", "9-404"),
+        ("Tuesday",   "09:00", "11:00", "COMP232", "9-406"),
+        ("Tuesday",   "12:00", "14:00", "COMP204", "10-108"),
+        ("Wednesday", "11:00", "13:00", "MATH207", "9-305"),
+        ("Wednesday", "14:00", "16:00", "COMP204", "9-405"),
+        ("Thursday",  "09:00", "11:00", "MCSC202", "9-405"),
+        ("Thursday",  "12:00", "14:00", "COMP231", "9-405"),
+        ("Thursday",  "14:00", "16:00", "MATH207", "9-405"),
+        ("Friday",    "09:00", "11:00", "COMP232", "9-405"),
+        ("Friday",    "12:00", "14:00", "COMP231", "9-312"),
+        ("Friday",    "14:00", "16:00", "MCSC202", "9-406"),
     ]
     for day, start, end, subject_id, room in routine_rows:
         cursor.execute(
@@ -1283,50 +1291,6 @@ def populate_ce2_data():
     conn.commit()
     conn.close()
     print("CE-II/II subjects and routine seeded.")
-
-
-def populate_ce1_data():
-    """
-    Seed MATH104 (CE-I/II, taught by Dr. Sushil Ghimire) so it appears on his
-    teacher dashboard alongside MCSC202.
-
-    NOTE: this is a simplified seed — CE-I/II has sections A/B/C/D, but the
-    'subjects' / 'students' tables only key on (course, year), not section.
-    So MATH104 will show up for ALL CE-I/II students (course='CE', year=1),
-    not just sections A and C where it's actually taught. The routine entries
-    below reflect the real timetable for sections A and C combined.
-    """
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
-    course, year, section = "CE", 1, "CE-I/II"
-
-    cursor.execute(
-        """INSERT OR IGNORE INTO subjects
-           (subject_id, subject_name, course, year, room, teacher_name)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        ("MATH104", "Advanced Calculus", course, year, "9-301 (Graduate Room)", "Dr. Sushil Ghimire")
-    )
-
-    # Clear any previously-seeded CE-I/II routine rows so this is re-runnable
-    cursor.execute("DELETE FROM routine WHERE course = ? AND year = ? AND section = ?", (course, year, section))
-
-    # (day, start, end, subject_id, room) — combined from CE-I/II A & C
-    routine_rows = [
-        ("Monday",    "09:00", "10:00", "MATH104", "9-301 (Graduate Room)"),  # CE-I/II A
-        ("Wednesday", "09:00", "10:00", "MATH104", "TTC"),                    # CE-I/II A
-        ("Thursday",  "12:00", "13:00", "MATH104", "TTC"),                    # CE-I/II C
-    ]
-    for day, start, end, subject_id, room in routine_rows:
-        cursor.execute(
-            """INSERT INTO routine (course, year, section, day, start_time, end_time, subject_id, room)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (course, year, section, day, start, end, subject_id, room)
-        )
-
-    conn.commit()
-    conn.close()
-    print("CE-I/II (MATH104) subjects and routine seeded.")
 
 
 if __name__ == "__main__":
