@@ -47,9 +47,10 @@
             .session-btn { padding:12px 18px; min-height:44px; font-size:13px; }
             .routine-btn { padding:10px 14px; min-height:44px; font-size:12px; }
 
-            /* Checkbox row — enlarge the box itself and give the whole row
-               padding so the label is one comfortable tap target, not a
-               14px square you have to hit precisely. */
+            #cameraContainer{
+                aspect-ratio: 4 / 3;
+                max-height: 240px;
+            }
             .alt-class-row { padding:8px 0; }
             .alt-class-row input[type=checkbox] { width:20px; height:20px; }
 
@@ -285,8 +286,8 @@
                 </div>
 
                 <!-- Camera container -->
-                <div id="cameraContainer" style="position:relative;background:#000;border-radius:12px;overflow:hidden;width:100%;">
-                    <video id="scannerVideo" autoplay playsinline muted style="width:100%;height:auto;display:none;"></video>
+                <div id="cameraContainer" style="position:relative;background:#000;border-radius:12px;overflow:hidden;width:100%;aspect-ratio:16/9;max-height:260px;margin:auto;">
+                    <video id="scannerVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:none;"></video>
                     <!-- DroidCam img goes here dynamically -->
                     <canvas id="scannerCanvas" style="display:none;"></canvas>
                     <div id="cameraPlaceholder" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 0;color:rgba(255,255,255,0.4);font-size:13px;gap:8px;">
