@@ -631,6 +631,31 @@ def teacher_dashboard():
                 for r in routine_rows
             ]
 
+    # Find all routine classes scheduled for today for this teacher's subjects
+    today_day = date.today().strftime("%A")
+    todays_classes = []
+    if subjects:
+        subject_ids = [s["subject_id"] for s in subjects]
+        placeholders = ",".join("?" * len(subject_ids))
+        todays_classes_rows = conn.execute(
+            f"""SELECT r.subject_id, s.subject_name, r.start_time, r.end_time, r.room
+               FROM routine r
+               JOIN subjects s ON r.subject_id = s.subject_id
+               WHERE r.subject_id IN ({placeholders}) AND r.day = ?
+               ORDER BY r.start_time ASC""",
+            subject_ids + [today_day]
+        ).fetchall()
+        todays_classes = [
+            {
+                "subject_id": r["subject_id"],
+                "subject_name": r["subject_name"],
+                "start_time": r["start_time"],
+                "end_time": r["end_time"],
+                "room": r["room"]
+            }
+            for r in todays_classes_rows
+        ]
+
     conn.close()
 
     return render_template(
@@ -648,6 +673,7 @@ def teacher_dashboard():
         class_stats=class_stats,
         session_open=session_open,
         today=today,
+        todays_classes=todays_classes,
     )
 
 
@@ -664,7 +690,7 @@ def api_open_session():
         return jsonify({"ok": False, "message": "Missing subject_id"})
 
     # Block silent auto-opening on non-routine days — teacher must explicitly
-    # tick "alternate/substitute class" if today isn't a scheduled day.
+    # tick "alternate/substitute class" if today isn't a scheduled day/time.
     if not alternate:
         conn = get_db()
         sub = conn.execute(
@@ -674,13 +700,46 @@ def api_open_session():
         if not sub:
             return jsonify({"ok": False, "message": "Subject not found"})
 
-        from database import get_routine_slot_for_today
         day_name = date.today().strftime("%A")
-        routine_id = get_routine_slot_for_today(subject_id, sub["course"], sub["year"], day_name)
-        if routine_id is None:
+        
+        # Get routine slots for the subject today
+        conn = get_db()
+        slots = conn.execute(
+            """SELECT routine_id, start_time, end_time FROM routine
+               WHERE subject_id=? AND course=? AND year=? AND day=?""",
+            (subject_id, sub["course"], sub["year"], day_name)
+        ).fetchall()
+        conn.close()
+
+        if not slots:
             return jsonify({
                 "ok": False,
                 "message": "This subject isn't on today's routine. Tick 'alternate/substitute class' to open it anyway."
+            })
+
+        # Helper to check if current time is within slot (with 15 mins early buffer)
+        current_time_str = datetime.now().strftime("%H:%M")
+        
+        def is_time_in_slot(curr_str, start_str, end_str):
+            def to_mins(t_str):
+                h, m = map(int, t_str.split(":"))
+                return h * 60 + m
+            c = to_mins(curr_str)
+            s = to_mins(start_str)
+            e = to_mins(end_str)
+            return (s - 15) <= c <= e
+
+        matching_slot = None
+        for slot in slots:
+            if is_time_in_slot(current_time_str, slot["start_time"], slot["end_time"]):
+                matching_slot = slot
+                break
+
+        if not matching_slot:
+            slot_times = ", ".join([f"{s['start_time']}–{s['end_time']}" for s in slots])
+            return jsonify({
+                "ok": False,
+                "message": f"This subject is scheduled for today at {slot_times}, but it is not class time yet (or the class has ended). Tick 'alternate/substitute class' to open it anyway."
             })
 
     session_id = db.open_routine_or_alternate_session(subject_id, force_alternate=alternate)

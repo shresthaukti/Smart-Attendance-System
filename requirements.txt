@@ -8,3 +8,5 @@ pyzbar
 openpyxl
 pyOpenSSL
 cryptography
+supabase
+python-dotenv
