@@ -24,3 +24,15 @@ A barcode-based attendance tracking web app designed around KU classrooms. Teach
 - Students and teachers imported in bulk from Excel sheets
 - Mobile-friendly UI
 - Docker + Gunicorn ready for deployment (tested on Render)
+
+## Tech Stack
+ 
+| Layer | Tools |
+|---|---|
+| Backend | Python, Flask, Gunicorn |
+| Database | SQLite |
+| Barcode scanning | OpenCV, pyzbar |
+| Auth | bcrypt |
+| Data import / export | openpyxl, CSV |
+| Frontend | HTML, CSS, JavaScript (Jinja2 templates) |
+| Deployment | Docker, Render |
