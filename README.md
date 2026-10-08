@@ -36,3 +36,24 @@ A barcode-based attendance tracking web app designed around KU classrooms. Teach
 | Data import / export | openpyxl, CSV |
 | Frontend | HTML, CSS, JavaScript (Jinja2 templates) |
 | Deployment | Docker, Render |
+
+## Project Structure
+ 
+```
+Smart-Attendance-System/
+├── app.py                  # Flask app: routes, APIs, dashboards, chat, CSV export
+├── database.py             # Schema, migrations, queries, Excel import, routine seeding
+├── attendance.py           # Core scan logic + CLI attendance simulator
+├── setup.py                # One-time DB creation, Excel import, routine seeding
+├── scanning.py             # Standalone desktop barcode scanner (IP camera / webcam)
+├── scanningtry.py          # Experimental barcode + face recognition scanner
+├── register_faces.py       # Experimental face enrollment (InsightFace)
+├── templates/              # Jinja2 pages (login, dashboards, chat)
+├── static/                 # CSS and routine page
+├── students.xlsx           # Student list (import source)
+├── teachers.xlsx           # Teacher list (import source)
+├── requirements.txt
+└── Dockerfile
+```
+ 
+> `add_today_session.py`, `adjust_today.py`, `backfill_attendance.py`, `boost_attendance.py`, `fix_student_attendance.py`, and the `check*.py` files are one-off maintenance and debugging scripts.
