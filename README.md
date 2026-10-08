@@ -1,2 +1,12 @@
 # Smart Attendance System
 A barcode-based attendance tracking web app designed around KU classrooms. Teachers open a class session, students scan their ID card barcodes, and attendance is recorded in real time with dashboards, notifications, and teacher–student chat.
+
+## Features
+ 
+**Teachers**
+- Secure login (bcrypt-hashed passwords)
+- Open and close attendance sessions per subject, following the weekly routine or an alternate slot
+- Scan student ID barcodes from the dashboard using a phone camera (e.g. DroidCam) or webcam
+- Live attendance view while a session is running
+- Full attendance reports per subject, with CSV export (optional date range)
+- Chat with students per subject
