@@ -10,3 +10,12 @@ A barcode-based attendance tracking web app designed around KU classrooms. Teach
 - Live attendance view while a session is running
 - Full attendance reports per subject, with CSV export (optional date range)
 - Chat with students per subject
+
+
+**Students**
+- Login and personal dashboard with per-subject attendance counts and percentages
+- Day-by-day attendance record
+- Notification each time attendance is marked
+- Chat with teachers, with unsend support
+- Weekly class routine view
+  
