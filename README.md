@@ -19,3 +19,8 @@ A barcode-based attendance tracking web app designed around KU classrooms. Teach
 - Chat with teachers, with unsend support
 - Weekly class routine view
   
+**System**
+- Duplicate-scan protection (one record per student, subject, and day)
+- Students and teachers imported in bulk from Excel sheets
+- Mobile-friendly UI
+- Docker + Gunicorn ready for deployment (tested on Render)
